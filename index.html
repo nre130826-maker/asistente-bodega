@@ -182,24 +182,62 @@
     hablar(r.texto);
   }
 
-  // ---------- Texto a voz ----------
-  let vozEs = null;
+// ---------- Texto a voz ----------
+  const TTS = window.speechSynthesis;
+  let vozEs = null, ultimoTexto = '', utter = null, vozDesbloqueada = false;
+
   function elegirVoz() {
-    const voces = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-    vozEs = ['es-CO', 'es-MX', 'es-US', 'es-419', 'es-ES'].map(l => voces.find(v => v.lang === l)).find(Boolean)
-         || voces.find(v => v.lang && v.lang.toLowerCase().startsWith('es')) || null;
+    const voces = TTS ? TTS.getVoices() : [];
+    const lang = v => (v.lang || '').replace('_', '-');
+    vozEs = ['es-CO', 'es-MX', 'es-US', 'es-419', 'es-ES'].map(l => voces.find(v => lang(v) === l)).find(Boolean)
+         || voces.find(v => lang(v).toLowerCase().startsWith('es')) || null;
   }
-  if (window.speechSynthesis) { elegirVoz(); speechSynthesis.onvoiceschanged = elegirVoz; }
+  if (TTS) { elegirVoz(); TTS.onvoiceschanged = elegirVoz; }
+
+  // Los navegadores solo dejan hablar después de un toque del usuario: "despertamos" la voz en el primer toque.
+  function desbloquearVoz() {
+    if (!TTS || vozDesbloqueada) return;
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    TTS.speak(u);
+    vozDesbloqueada = true;
+  }
+  document.addEventListener('click', desbloquearVoz, true);
+  document.addEventListener('touchend', desbloquearVoz, true);
 
   function hablar(texto) {
-    if (!window.speechSynthesis || !texto) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(texto);
-    u.lang = vozEs ? vozEs.lang : 'es-ES';
-    if (vozEs) u.voice = vozEs;
-    u.rate = 1.03;
-    speechSynthesis.speak(u);
+    ultimoTexto = texto || ultimoTexto;
+    if (!TTS || !ultimoTexto) return;
+    TTS.cancel();
+    setTimeout(() => { // Chrome a veces queda mudo si se habla justo después de cancel()
+      if (!vozEs) elegirVoz();
+      utter = new SpeechSynthesisUtterance(ultimoTexto); // referencia global: evita que Chrome la descarte
+      utter.lang = vozEs ? vozEs.lang : 'es-ES';
+      if (vozEs) utter.voice = vozEs;
+      utter.rate = 1.03;
+      utter.volume = 1;
+      utter.onerror = e => {
+        if (e.error !== 'interrupted' && e.error !== 'canceled') {
+          estado.textContent = 'No pude reproducir la voz (' + e.error + '). Toca "Escuchar respuesta".';
+        }
+      };
+      TTS.resume();
+      TTS.speak(utter);
+    }, 300);
   }
+
+  // Botón para escuchar (o repetir) la respuesta en voz alta
+  const btnVoz = document.createElement('button');
+  btnVoz.type = 'button';
+  btnVoz.className = 'chip';
+  btnVoz.textContent = '🔊 Escuchar respuesta';
+  btnVoz.style.display = 'none';
+  btnVoz.addEventListener('click', () => hablar());
+  $('respuesta').after(btnVoz);
+  new MutationObserver(() => {
+    btnVoz.style.display = $('respuesta').style.display === 'block' ? '' : 'none';
+  }).observe($('respuesta'), { attributes: true, attributeFilter: ['style'] });
+  if (!TTS) btnVoz.remove();
 </script>
 </body>
 </html>
