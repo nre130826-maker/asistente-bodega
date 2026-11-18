@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asistente de bodega</title>
+  <style>
+    :root {
+      --bg: #f4f5f7; --card: #ffffff; --text: #1d2430; --muted: #5d6675; --line: #e3e6eb;
+      --accent: #1f6feb; --accent-2: #e5484d;
+      --ok: #1a7f37; --ok-bg: #e6f4ea; --warn: #9a6700; --warn-bg: #fff4d6; --bad: #c62828; --bad-bg: #fde7e7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151a; --card: #1b2028; --text: #e8ebf0; --muted: #9aa3b2; --line: #2a313c;
+        --accent: #4c8dff; --ok: #5bd17d; --ok-bg: #173323; --warn: #f2c14e; --warn-bg: #3a2f12; --bad: #ff7b7b; --bad-bg: #3b1a1a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    h1 { font-size: 1.35rem; margin: 0; }
+    .sub { color: var(--muted); margin: -8px 0 0; text-align: center; }
+    #mic {
+      width: 128px; height: 128px; border-radius: 50%; border: 0; cursor: pointer; margin-top: 8px;
+      background: var(--accent); color: #fff; display: grid; place-items: center;
+      box-shadow: 0 8px 24px rgba(31,111,235,.35); transition: transform .15s, background .2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #mic:active { transform: scale(.96); }
+    #mic.escuchando { background: var(--accent-2); animation: pulso 1.2s infinite; }
+    #mic:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+    @keyframes pulso { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.55); } 100% { box-shadow: 0 0 0 26px rgba(229,72,77,0); } }
+    #estado { color: var(--muted); min-height: 1.4em; text-align: center; margin: 0; }
+    #pregunta { font-style: italic; color: var(--muted); text-align: center; min-height: 1.4em; }
+    #respuesta { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; font-size: 1.08rem; display: none; }
+    #items { width: 100%; display: grid; gap: 10px; }
+    .item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+    .item .nom { font-weight: 600; }
+    .item .cant { font-weight: 700; font-size: 1.1rem; text-align: right; }
+    .item .meta { color: var(--muted); font-size: .88rem; grid-column: 1 / -1; }
+    .badge { font-size: .75rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; justify-self: end; }
+    .ok { color: var(--ok); background: var(--ok-bg); }
+    .bajo, .pedir { color: var(--warn); background: var(--warn-bg); }
+    .agotado, .revisar { color: var(--bad); background: var(--bad-bg); }
+    form { width: 100%; display: flex; gap: 8px; }
+    input { flex: 1; min-width: 0; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 1rem; }
+    form button { padding: 12px 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 600; font-size: 1rem; cursor: pointer; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .chip { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 99px; padding: 6px 12px; font-size: .9rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Asistente de bodega</h1>
+  <p class="sub">Toca el micrófono y pregunta, por ejemplo: “¿Cuánto ribete gris hay?”</p>
+
+  <button id="mic" aria-label="Hablar">
+    <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/>
+    </svg>
+  </button>
+  <p id="estado">Toca para hablar</p>
+  <div id="pregunta"></div>
+  <div id="respuesta"></div>
+  <div id="items"></div>
+
+  <form id="form" autocomplete="off">
+    <input id="texto" placeholder="O escribe tu pregunta…" aria-label="Pregunta escrita">
+    <button type="submit">Preguntar</button>
+  </form>
+  <div class="chips">
+    <button class="chip">¿Qué hay que pedir?</button>
+    <button class="chip">¿Dónde están las grapas de tiro?</button>
+    <button class="chip">¿Se va a acabar la cincha?</button>
+  </div>
+</main>
+
+<script>
+  // Solo si alojas este HTML FUERA de Apps Script (p. ej. GitHub Pages): pega aquí la URL /exec.
+  const API_URL = 'https://script.google.com/macros/s/AKfycby1Zai0Au0I4pv0Qjq7kVm-cluKyOr6UcDO9Io7Vr7xXiVFsMupv9Up7IcORzidx7Zq/exec';
+
+  const $ = id => document.getElementById(id);
+  const mic = $('mic'), estado = $('estado');
+  const ETIQUETA = { ok: 'OK', bajo: 'Bajo mínimo', pedir: 'Pedir ya', agotado: 'Agotado', revisar: 'Revisar' };
+
+  // ---------- Voz a texto ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, escuchando = false, textoFinal = '';
+
+  if (SR) {
+    rec = new SR();
+    rec.lang = 'es-CO';
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.onstart = () => { escuchando = true; mic.classList.add('escuchando'); estado.textContent = 'Te escucho…'; };
+    rec.onresult = e => {
+      let t = '';
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      $('pregunta').textContent = '“' + t + '”';
+      if (e.results[e.results.length - 1].isFinal) textoFinal = t;
+    };
+    rec.onerror = e => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        estado.textContent = 'No tengo permiso para el micrófono. Permítelo en el navegador o escribe la pregunta.';
+      } else if (e.error === 'no-speech') {
+        estado.textContent = 'No te escuché. Intenta de nuevo.';
+      } else {
+        estado.textContent = 'Error con el micrófono (' + e.error + '). Puedes escribir la pregunta.';
+      }
+    };
+    rec.onend = () => {
+      escuchando = false; mic.classList.remove('escuchando');
+      if (textoFinal) { enviar(textoFinal); textoFinal = ''; }
+      else if (estado.textContent === 'Te escucho…') estado.textContent = 'Toca para hablar';
+    };
+  } else {
+    mic.disabled = true;
+    estado.textContent = 'Este navegador no reconoce voz. Usa Chrome o escribe la pregunta.';
+  }
+
+  mic.addEventListener('click', () => {
+    if (!rec) return;
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    if (escuchando) { rec.stop(); return; }
+    try { rec.start(); } catch (_) { /* ya estaba iniciado */ }
+  });
+
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    const q = $('texto').value.trim();
+    if (q) { $('pregunta').textContent = '“' + q + '”'; enviar(q); $('texto').value = ''; }
+  });
+  document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    $('pregunta').textContent = '“' + c.textContent + '”'; enviar(c.textContent);
+  }));
+
+  // ---------- Consulta al Apps Script ----------
+  function enviar(q) {
+    estado.textContent = 'Buscando…';
+    if (window.google && google.script && google.script.run) {
+      google.script.run.withSuccessHandler(mostrar).withFailureHandler(fallo).preguntar(q);
+    } else if (API_URL) {
+      fetch(API_URL + '?q=' + encodeURIComponent(q)).then(r => r.json()).then(mostrar).catch(fallo);
+    } else {
+      fallo('Falta configurar API_URL');
+    }
+  }
+
+  function fallo(err) {
+    estado.textContent = 'No pude consultar el inventario. Revisa la conexión.';
+    console.error(err);
+  }
+
+  function mostrar(r) {
+    estado.textContent = rec ? 'Toca para hablar' : '';
+    const caja = $('respuesta');
+    caja.textContent = r.texto;
+    caja.style.display = 'block';
+
+    const cont = $('items');
+    cont.replaceChildren();
+    (r.items || []).slice(0, 12).forEach(it => {
+      const d = document.createElement('div'); d.className = 'item';
+      const nom = document.createElement('div'); nom.className = 'nom'; nom.textContent = it.nombre;
+      const cant = document.createElement('div'); cant.className = 'cant';
+      cant.textContent = String(it.stock).replace('.', ',') + (it.unidad ? ' ' + it.unidad : '');
+      const meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = [
+        it.zona ? 'Zona ' + it.zona : 'Sin zona',
+        it.bodega,
+        it.min !== null && it.min !== undefined ? 'Mín. ' + it.min : '',
+        it.diasRestantes !== null ? '≈ ' + it.diasRestantes + ' días' : '',
+        it.proveedor,
+      ].filter(Boolean).join(' · ');
+      const badge = document.createElement('span'); badge.className = 'badge ' + it.estado; badge.textContent = ETIQUETA[it.estado] || it.estado;
+      d.append(nom, cant, meta, badge);
+      cont.append(d);
+    });
+
+    hablar(r.texto);
+  }
+
+  // ---------- Texto a voz ----------
+  let vozEs = null;
+  function elegirVoz() {
+    const voces = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    vozEs = ['es-CO', 'es-MX', 'es-US', 'es-419', 'es-ES'].map(l => voces.find(v => v.lang === l)).find(Boolean)
+         || voces.find(v => v.lang && v.lang.toLowerCase().startsWith('es')) || null;
+  }
+  if (window.speechSynthesis) { elegirVoz(); speechSynthesis.onvoiceschanged = elegirVoz; }
+
+  function hablar(texto) {
+    if (!window.speechSynthesis || !texto) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(texto);
+    u.lang = vozEs ? vozEs.lang : 'es-ES';
+    if (vozEs) u.voice = vozEs;
+    u.rate = 1.03;
+    speechSynthesis.speak(u);
+  }
+</script>
+</body>
+</html>
